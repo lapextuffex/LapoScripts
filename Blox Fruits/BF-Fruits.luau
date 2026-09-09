@@ -25,7 +25,7 @@ end
 local ScriptArguments = ...
 local ExternalConfig = type(ScriptArguments) == "table" and ScriptArguments
     or (type(Environment.LapoFruitConfig) == "table" and Environment.LapoFruitConfig or {})
-local ScriptUrl = "https://raw.githubusercontent.com/lapextuffex/LapoScripts/refs/heads/main/BF-Fruits"
+local ScriptUrl = "https://raw.githubusercontent.com/lapextuffex/LapoScripts/refs/heads/main/Blox%20Fruits/BF-Fruits.luau"
 local HasExternalConfig = next(ExternalConfig) ~= nil
 
 local loaded, Library = pcall(function()
