@@ -1,6 +1,6 @@
 local LIBRARY_URL = "https://raw.githubusercontent.com/LapoLapoNaldo/Lapo-X2/refs/heads/main/Library.lua"
 local HUB_FOLDER = "LapoFruitHub"
-local HUB_VERSION = "1.8.0"
+local HUB_VERSION = "1.9.0"
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,7 +25,7 @@ end
 local ScriptArguments = ...
 local ExternalConfig = type(ScriptArguments) == "table" and ScriptArguments
     or (type(Environment.LapoFruitConfig) == "table" and Environment.LapoFruitConfig or {})
-local ScriptUrl = type(Environment.LapoFruitScriptUrl) == "string" and Environment.LapoFruitScriptUrl or "URL_DO_SEU_HUB"
+local ScriptUrl = "https://raw.githubusercontent.com/lapextuffex/LapoScripts/refs/heads/main/BF-Fruits"
 local HasExternalConfig = next(ExternalConfig) ~= nil
 
 local loaded, Library = pcall(function()
@@ -57,6 +57,11 @@ local Runtime = {
     StorageWorkers = 0,
     CharacterGeneration = 0,
     MovementGuard = nil,
+    EventBusy = false,
+    EventType = nil,
+    EventTarget = nil,
+    EventTween = nil,
+    EventTool = nil,
     EmptyScanCount = 0,
 }
 
@@ -77,10 +82,12 @@ local State = {
     AutoSniper = false,
     SniperTargets = {},
     SniperInterval = 15,
+    AutoRandomFruit = false,
     AutoServerHop = true,
     HopAfter = 10,
     HopPages = 3,
     HopRetries = 8,
+    AutoRaidFactory = false,
     WebhookEnabled = false,
     WebhookUrl = "",
     WebhookStored = true,
@@ -129,9 +136,11 @@ local function applyExternalConfig(config)
     State.AntiIdle = externalValue(config, { "antiIdle" }, State.AntiIdle, "boolean")
     State.AutoSniper = externalValue(config, { "autoSniper" }, State.AutoSniper, "boolean")
     State.SniperInterval = externalValue(config, { "sniperInterval" }, State.SniperInterval, "number")
+    State.AutoRandomFruit = externalValue(config, { "autoRandomFruit", "randomFruit" }, State.AutoRandomFruit, "boolean")
     State.HopAfter = externalValue(config, { "hopAfter" }, State.HopAfter, "number")
     State.HopPages = externalValue(config, { "hopPages" }, State.HopPages, "number")
     State.HopRetries = externalValue(config, { "hopRetries" }, State.HopRetries, "number")
+    State.AutoRaidFactory = externalValue(config, { "autoRaidFactory", "autoPirateRaid", "autoFactory", "autoPirateRaidFactory" }, State.AutoRaidFactory, "boolean")
     State.WebhookUrl = externalValue(config, { "webhookUrl", "webhookURL", "webhookurl", "webookurl" }, State.WebhookUrl, "string")
     State.WebhookEnabled = externalValue(config, { "webhookEnabled", "sendWebhookOnCollect", "sendWebhookOnStore" }, State.WebhookEnabled, "boolean")
     State.WebhookMinimumValue = externalValue(config, { "webhookMinimumValue" }, State.WebhookMinimumValue, "number")
@@ -174,9 +183,11 @@ local function configSnapshot()
         autoSniper = State.AutoSniper,
         sniperTargets = sniper,
         sniperInterval = State.SniperInterval,
+        autoRandomFruit = State.AutoRandomFruit,
         hopAfter = State.HopAfter,
         hopPages = State.HopPages,
         hopRetries = State.HopRetries,
+        autoRaidFactory = State.AutoRaidFactory,
         webhookUrl = State.WebhookUrl,
         webhookEnabled = State.WebhookEnabled,
         sendWebhookOnCollect = State.WebhookEnabled,
@@ -204,8 +215,8 @@ local function buildConfigLoader()
     local order = {
         "collectFruit", "storeFruit", "autoServerHop", "espFruit", "filterMode", "selectedFruits",
         "minimumValue", "priority", "movement", "tweenSpeed", "scanInterval", "pickupTimeout",
-        "storeDelay", "antiIdle", "autoSniper", "sniperTargets", "sniperInterval", "hopAfter",
-        "hopPages", "hopRetries", "webhookUrl", "webhookEnabled", "sendWebhookOnCollect",
+        "storeDelay", "antiIdle", "autoSniper", "sniperTargets", "sniperInterval", "autoRandomFruit", "hopAfter",
+        "hopPages", "hopRetries", "autoRaidFactory", "webhookUrl", "webhookEnabled", "sendWebhookOnCollect",
         "sendWebhookOnStore", "webhookMinimumValue", "webhookMention", "webhookUserId",
         "webhookIncludeServer", "webhookInterval",
     }
@@ -250,6 +261,7 @@ local syncStateFromControls
 local safeCollectFruit
 local serverHop
 local pivotCharacterTo
+local stopEventAutomation
 
 local function entropySeed()
     local source = table.concat({
@@ -527,7 +539,7 @@ local function registerWorldFruit(tool)
     if allowed then
         Runtime.NoFruitSince = os.clock()
     end
-    if Runtime.TeamReady and (State.AutoCollect or State.AutoServerHop) and allowed
+    if Runtime.TeamReady and not Runtime.EventBusy and (State.AutoCollect or State.AutoServerHop) and allowed
         and not Runtime.BusyCollecting and safeCollectFruit then
         task.spawn(safeCollectFruit, tool)
     end
@@ -1044,7 +1056,267 @@ local function collectFruit(tool, manual)
     return success
 end
 
+local PIRATE_RAID_CENTER = Vector3.new(-5543.532, 313.8, -2964.258)
+local PIRATE_RAID_RADIUS = 1600
+local PIRATE_RAID_NAMES = {}
+for _, name in ipairs({
+    "Galley Pirate", "Galley Captain", "Raider", "Mercenary", "Vampire", "Zombie",
+    "Snow Trooper", "Winter Warrior", "Lab Subordinate", "Horned Warrior", "Magma Ninja",
+    "Lava Pirate", "Ship Deckhand", "Ship Engineer", "Ship Steward", "Ship Officer",
+    "Arctic Warrior", "Snow Lurker", "Sea Soldier", "Water Fighter",
+}) do
+    PIRATE_RAID_NAMES[normalize(name)] = true
+end
+
+local function eventPart(target)
+    if not target then return nil end
+    if target:IsA("BasePart") then return target end
+    return target:FindFirstChild("HumanoidRootPart", true)
+        or target.PrimaryPart
+        or target:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function eventTargetAlive(target)
+    local part = eventPart(target)
+    if not part or not part.Parent then return false end
+    local humanoid = target:IsA("Model") and target:FindFirstChildOfClass("Humanoid") or nil
+    if humanoid and (not humanoid.Parent or humanoid.Health <= 0) then return false end
+    local health = target:GetAttribute("Health")
+    if type(health) == "number" and health <= 0 then return false end
+    return true
+end
+
+local function factoryCoreTarget()
+    if seaName() ~= "Second Sea" then return nil end
+    local enemies = Workspace:FindFirstChild("Enemies")
+    if enemies then
+        for _, target in ipairs(enemies:GetChildren()) do
+            local key = normalize(target.Name)
+            if (key == "core" or key:find("factorycore", 1, true)) and eventTargetAlive(target) then
+                return target
+            end
+        end
+    end
+    for _, target in ipairs(Workspace:GetChildren()) do
+        if normalize(target.Name) == "core" and eventTargetAlive(target) then
+            return target
+        end
+    end
+end
+
+local function pirateRaidTargets()
+    if seaName() ~= "Third Sea" then return {} end
+    local enemies = Workspace:FindFirstChild("Enemies")
+    if not enemies then return {} end
+    local targets = {}
+    for _, target in ipairs(enemies:GetChildren()) do
+        if target:IsA("Model") and eventTargetAlive(target) then
+            local key = normalize(target.Name)
+            local part = eventPart(target)
+            local isRaidName = PIRATE_RAID_NAMES[key] or key:find("tanky", 1, true) ~= nil
+            if isRaidName and part and (part.Position - PIRATE_RAID_CENTER).Magnitude <= PIRATE_RAID_RADIUS then
+                table.insert(targets, target)
+            end
+        end
+    end
+    table.sort(targets, function(a, b)
+        local aTank = normalize(a.Name):find("tanky", 1, true) ~= nil
+        local bTank = normalize(b.Name):find("tanky", 1, true) ~= nil
+        if aTank ~= bTank then return aTank end
+        local root = characterRoot()
+        local aPart, bPart = eventPart(a), eventPart(b)
+        if not root or not aPart or not bPart then return a.Name < b.Name end
+        return (root.Position - aPart.Position).Magnitude < (root.Position - bPart.Position).Magnitude
+    end)
+    return targets
+end
+
+local function findActiveRaidFactory()
+    local core = factoryCoreTarget()
+    if core then return "Factory", { core } end
+    local pirates = pirateRaidTargets()
+    if #pirates > 0 then return "Pirate Raid", pirates end
+end
+
+local function isPhysicalFruitTool(tool)
+    if not tool or not tool:IsA("Tool") then return true end
+    return isFruit(tool) or CatalogByAlias[normalize(tool.Name)] ~= nil
+end
+
+local function combatToolScore(tool)
+    local tooltip = ""
+    pcall(function() tooltip = tostring(tool.ToolTip or ""):lower() end)
+    local name = tostring(tool.Name or ""):lower()
+    if tooltip:find("sword", 1, true) or name:find("sword", 1, true) then return 1 end
+    if tooltip:find("melee", 1, true) or name:find("godhuman", 1, true)
+        or name:find("karate", 1, true) or name:find("claw", 1, true) then return 2 end
+    if tooltip:find("gun", 1, true) then return 3 end
+    if tooltip:find("blox fruit", 1, true) then return 4 end
+    return 5
+end
+
+local function findCombatTool()
+    local candidates = {}
+    for _, container in ipairs({ LocalPlayer.Character, Backpack }) do
+        if container then
+            for _, tool in ipairs(container:GetChildren()) do
+                if tool:IsA("Tool") and not isPhysicalFruitTool(tool) then
+                    table.insert(candidates, tool)
+                end
+            end
+        end
+    end
+    table.sort(candidates, function(a, b)
+        local aScore, bScore = combatToolScore(a), combatToolScore(b)
+        if aScore == bScore then return a.Name < b.Name end
+        return aScore < bScore
+    end)
+    return candidates[1]
+end
+
+local function attackEventTarget()
+    local root, humanoid = characterRoot()
+    if not root or not humanoid then return false end
+    local tool = Runtime.EventTool
+    if not tool or not tool.Parent or isPhysicalFruitTool(tool) then
+        tool = findCombatTool()
+        Runtime.EventTool = tool
+    end
+    if tool then
+        if tool.Parent == Backpack then
+            pcall(function() humanoid:EquipTool(tool) end)
+            task.wait(0.05)
+        end
+        pcall(function() tool:Activate() end)
+        if type(mouse1click) == "function" then pcall(mouse1click) end
+        return true
+    end
+    if type(mouse1click) == "function" then
+        pcall(mouse1click)
+        return true
+    end
+    local clicked = pcall(function()
+        VirtualUser:CaptureController()
+        VirtualUser:Button1Down(Vector2.new(0, 0))
+        VirtualUser:Button1Up(Vector2.new(0, 0))
+    end)
+    return clicked
+end
+
+local function eventCharacterValid(character, humanoid, generation)
+    return Runtime.Running and Runtime.EventBusy and LocalPlayer.Character == character
+        and Runtime.CharacterGeneration == generation and humanoid.Parent == character and humanoid.Health > 0
+end
+
+local function eventMoveTo(target)
+    local root, humanoid = characterRoot()
+    local part = eventPart(target)
+    if not root or not humanoid or not part then return false end
+    local character = root.Parent
+    local generation = Runtime.CharacterGeneration
+    local guard = Runtime.MovementGuard
+    if not guard or guard.Character ~= character then
+        guard = startMovementGuard(character, root, humanoid)
+    end
+    local position = part.Position + Vector3.new(0, 20, 0)
+    local distance = (root.Position - position).Magnitude
+    if distance <= 7 then
+        guard.HoldPosition = position
+        return true
+    end
+
+    local driver = Instance.new("CFrameValue")
+    driver.Name = "LapoEventTweenDriver"
+    local currentPivot = character:GetPivot()
+    local orientation = currentPivot - currentPivot.Position
+    driver.Value = currentPivot
+    local tween = TweenService:Create(
+        driver,
+        TweenInfo.new(math.max(0.05, distance / math.max(State.TweenSpeed, 1)), Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+        { Value = CFrame.new(position) * orientation }
+    )
+    local driverConnection = RunService.Heartbeat:Connect(function()
+        if eventCharacterValid(character, humanoid, generation) then character:PivotTo(driver.Value) end
+    end)
+    guard.Driver = driver
+    guard.DriverConnection = driverConnection
+    Runtime.CurrentTween = tween
+    Runtime.EventTween = tween
+    tween:Play()
+    local deadline = os.clock() + math.max(0.05, distance / math.max(State.TweenSpeed, 1)) + 2
+    while eventCharacterValid(character, humanoid, generation) and eventTargetAlive(target) and os.clock() < deadline do
+        if (root.Position - position).Magnitude <= 8 then break end
+        task.wait(0.03)
+    end
+    pcall(function() tween:Cancel() end)
+    pcall(function() driverConnection:Disconnect() end)
+    pcall(function() driver:Destroy() end)
+    if guard.Driver == driver then
+        guard.Driver = nil
+        guard.DriverConnection = nil
+    end
+    if Runtime.CurrentTween == tween then Runtime.CurrentTween = nil end
+    if Runtime.EventTween == tween then Runtime.EventTween = nil end
+    if not eventCharacterValid(character, humanoid, generation) then return false end
+    guard.HoldPosition = position
+    return (root.Position - position).Magnitude <= 20
+end
+
+local function runAutoRaidFactory()
+    if Runtime.EventBusy or not State.AutoRaidFactory or not Runtime.Running then return end
+    Runtime.EventBusy = true
+    Runtime.EventType = nil
+    Runtime.EventTarget = nil
+    Runtime.EventTool = nil
+    while Runtime.Running and State.AutoRaidFactory and Runtime.BusyCollecting do task.wait(0.1) end
+    if not Runtime.Running or not State.AutoRaidFactory then
+        stopEventAutomation()
+        return
+    end
+    while Runtime.Running and State.AutoRaidFactory do
+        local eventType, targets = findActiveRaidFactory()
+        if not eventType or #targets == 0 then break end
+        Runtime.EventType = eventType
+        local target = targets[1]
+        Runtime.EventTarget = target
+        local part = eventPart(target)
+        if part and eventTargetAlive(target) then
+            if eventMoveTo(target) then
+                local attackDeadline = os.clock() + 40
+                while Runtime.Running and State.AutoRaidFactory and eventTargetAlive(target)
+                    and os.clock() < attackDeadline do
+                    local currentPart = eventPart(target)
+                    local guard = Runtime.MovementGuard
+                    if currentPart and guard then
+                        guard.HoldPosition = currentPart.Position + Vector3.new(0, 20, 0)
+                    end
+                    attackEventTarget()
+                    task.wait(0.08)
+                end
+            else
+                task.wait(0.4)
+            end
+        else
+            task.wait(0.2)
+        end
+    end
+    stopEventAutomation()
+    if Runtime.Running and shouldAutoStore() then task.spawn(storeInventory) end
+end
+
+stopEventAutomation = function()
+    if Runtime.EventTween then pcall(function() Runtime.EventTween:Cancel() end) end
+    Runtime.EventTween = nil
+    if Runtime.EventBusy then stopMovementGuard() end
+    Runtime.EventBusy = false
+    Runtime.EventType = nil
+    Runtime.EventTarget = nil
+    Runtime.EventTool = nil
+    Runtime.NoFruitSince = os.clock()
+end
+
 safeCollectFruit = function(tool, manual)
+    if Runtime.EventBusy then return false end
     local ok, result = pcall(collectFruit, tool, manual)
     if not ok then
         if Runtime.CurrentTween then pcall(function() Runtime.CurrentTween:Cancel() end) end
@@ -1078,6 +1350,14 @@ local function purchaseFruit(storageName)
         return false
     end
     return true
+end
+
+local function buyRandomFruit()
+    if not State.AutoRandomFruit or os.clock() - Runtime.LastRandomBuy < 10 then return false end
+    Runtime.LastRandomBuy = os.clock()
+    local ok = invoke("Cousin", "Buy")
+    if ok then task.delay(0.5, function() if Runtime.Running and shouldAutoStore() then storeInventory() end end) end
+    return ok
 end
 
 local function runSniper()
@@ -1146,11 +1426,16 @@ local function scheduleHopRetry()
     local mayRetry = Runtime.HopManual or State.AutoServerHop
     Runtime.Hopping = false
     Runtime.ActiveHopId = nil
-    if not mayRetry or attempt >= State.HopRetries then
+    if not mayRetry then
         Runtime.HopAttempt = 0
         Runtime.HopManual = false
         Runtime.NoFruitSince = os.clock()
         return
+    end
+    local refreshAfter = math.max(1, math.floor(tonumber(State.HopRetries) or 1))
+    if attempt >= refreshAfter then
+        table.clear(VisitedServers)
+        VisitedServers[game.JobId] = true
     end
 
     Runtime.RetryScheduled = true
@@ -1287,6 +1572,47 @@ FruitTab:Button({
 })
 FruitTab:Button({ section = "collection", text = "Guardar frutas do inventario", callback = function() task.spawn(storeInventory) end })
 
+FruitTab:Section({ id = "events", text = "Eventos", expanded = true, persist = false })
+Controls.AutoRaidFactory = FruitTab:Toggle({
+    id = "auto-raid-factory", section = "events", text = "Auto Pirate Raid / Factory",
+    default = State.AutoRaidFactory,
+    callback = function(value)
+        State.AutoRaidFactory = value
+        if not value and stopEventAutomation then stopEventAutomation() end
+    end,
+})
+
+FruitTab:Section({ id = "random-fruit", text = "Random Fruit", expanded = true, persist = false })
+Controls.AutoRandomFruit = FruitTab:Toggle({
+    id = "auto-random-fruit", section = "random-fruit", text = "Auto Random Fruit",
+    default = State.AutoRandomFruit,
+    callback = function(value) State.AutoRandomFruit = value end,
+})
+
+FruitTab:Section({ id = "shop", text = "Loja e Gacha", expanded = true, persist = false })
+FruitTab:Button({
+    section = "shop", text = "Atualizar catalogo/estoque",
+    callback = function()
+        task.spawn(function()
+            refreshCatalog()
+        end)
+    end,
+})
+Controls.SniperTargets = FruitTab:Dropdown({
+    id = "sniper-targets", section = "shop", text = "Alvos do sniper",
+    options = fallbackOptions(), multiple = true, default = copyStringArray(State.SniperTargets) or {},
+    callback = function(value) State.SniperTargets = value end,
+})
+Controls.AutoSniper = FruitTab:Toggle({
+    id = "auto-sniper", section = "shop", text = "Auto comprar quando houver estoque",
+    default = State.AutoSniper, callback = function(value) State.AutoSniper = value end,
+})
+Controls.SniperInterval = FruitTab:Slider({
+    id = "sniper-interval", section = "shop", text = "Intervalo do sniper (segundos)",
+    min = 10, max = 120, step = 5, default = State.SniperInterval,
+    callback = function(value) State.SniperInterval = value end,
+})
+
 FruitTab:Section({ id = "server-hop", text = "Server Hop", expanded = true, persist = false })
 Controls.AutoServerHop = FruitTab:Toggle({
     id = "auto-server-hop", section = "server-hop", text = "Auto Server Hop",
@@ -1315,38 +1641,6 @@ Controls.HopRetries = FruitTab:Slider({
 FruitTab:Button({
     section = "server-hop", text = "Server Hop agora",
     callback = function() task.spawn(serverHop, true) end,
-})
-
-FruitTab:Section({ id = "shop", text = "Loja e Gacha", expanded = true, persist = false })
-FruitTab:Button({
-    section = "shop", text = "Atualizar catalogo/estoque",
-    callback = function()
-        task.spawn(function()
-            refreshCatalog()
-        end)
-    end,
-})
-Controls.SniperTargets = FruitTab:Dropdown({
-    id = "sniper-targets", section = "shop", text = "Alvos do sniper",
-    options = fallbackOptions(), multiple = true, default = copyStringArray(State.SniperTargets) or {},
-    callback = function(value) State.SniperTargets = value end,
-})
-Controls.AutoSniper = FruitTab:Toggle({
-    id = "auto-sniper", section = "shop", text = "Auto comprar quando houver estoque",
-    default = State.AutoSniper, callback = function(value) State.AutoSniper = value end,
-})
-Controls.SniperInterval = FruitTab:Slider({
-    id = "sniper-interval", section = "shop", text = "Intervalo do sniper (segundos)",
-    min = 10, max = 120, step = 5, default = State.SniperInterval,
-    callback = function(value) State.SniperInterval = value end,
-})
-FruitTab:Button({
-    section = "shop", text = "Comprar fruta aleatoria (Gacha)",
-    callback = function()
-        if os.clock() - Runtime.LastRandomBuy < 5 then return end
-        Runtime.LastRandomBuy = os.clock()
-        invoke("Cousin", "Buy")
-    end,
 })
 
 ConfigTab:Section({ id = "movement", text = "Movimento e desempenho", expanded = true, persist = false })
@@ -1386,12 +1680,6 @@ ConfigTab:Section({ id = "profiles", text = "Perfil", expanded = true, persist =
 Controls.ProfileName = ConfigTab:TextBox({
     id = "profile-name", section = "profiles", text = "Nome do perfil", default = "default", persist = false,
     placeholder = "default", callback = function(value) State.ProfileName = value ~= "" and value or "default" end,
-})
-Controls.ScriptUrl = ConfigTab:TextBox({
-    id = "script-url", section = "profiles", text = "URL do hub para exportar", default = ScriptUrl, persist = false,
-    placeholder = "https://.../new.luau", callback = function(value)
-        if value and value ~= "" then ScriptUrl = value end
-    end,
 })
 ConfigTab:Button({
     section = "profiles", text = "Salvar perfil agora",
@@ -1505,10 +1793,12 @@ syncStateFromControls = function()
     State.AutoSniper = Controls.AutoSniper:Get()
     State.SniperTargets = Controls.SniperTargets:Get()
     State.SniperInterval = Controls.SniperInterval:Get()
+    State.AutoRandomFruit = Controls.AutoRandomFruit:Get()
     State.AutoServerHop = Controls.AutoServerHop:Get()
     State.HopAfter = Controls.HopAfter:Get()
     State.HopPages = Controls.HopPages:Get()
     State.HopRetries = Controls.HopRetries:Get()
+    State.AutoRaidFactory = Controls.AutoRaidFactory:Get()
     State.WebhookEnabled = Controls.WebhookEnabled:Get()
     State.WebhookUrl = Controls.WebhookUrl:Get()
     State.WebhookStored = Controls.WebhookStored:Get()
@@ -1549,8 +1839,11 @@ function Hub.Destroy()
     Runtime.Running = false
     State.AutoCollect = false
     State.AutoSniper = false
+    State.AutoRandomFruit = false
     State.AutoServerHop = false
+    State.AutoRaidFactory = false
     if Runtime.CurrentTween then pcall(function() Runtime.CurrentTween:Cancel() end) end
+    stopEventAutomation()
     stopMovementGuard()
     for _, connection in ipairs(Connections) do pcall(function() connection:Disconnect() end) end
     for tool in pairs(EspObjects) do removeEsp(tool) end
@@ -1569,6 +1862,8 @@ local function invalidateCharacterMovement()
     Runtime.CharacterGeneration = Runtime.CharacterGeneration + 1
     if Runtime.CurrentTween then pcall(function() Runtime.CurrentTween:Cancel() end) end
     Runtime.CurrentTween = nil
+    Runtime.EventTween = nil
+    Runtime.EventTool = nil
     Runtime.CurrentTarget = nil
     Runtime.BusyCollecting = false
     stopMovementGuard()
@@ -1623,9 +1918,20 @@ task.spawn(function()
 end)
 
 task.spawn(function()
+    while Runtime.Running do
+        if State.AutoRaidFactory and Runtime.TeamReady and not Runtime.EventBusy
+            and not Runtime.BusyCollecting and not Runtime.Hopping then
+            local eventType = findActiveRaidFactory()
+            if eventType then runAutoRaidFactory() end
+        end
+        task.wait(State.AutoRaidFactory and 0.25 or 0.75)
+    end
+end)
+
+task.spawn(function()
     task.spawn(refreshCatalog)
     while Runtime.Running do
-        if Runtime.TeamReady and (State.AutoCollect or State.AutoServerHop) and not Runtime.BusyCollecting then
+        if Runtime.TeamReady and not Runtime.EventBusy and (State.AutoCollect or State.AutoServerHop) and not Runtime.BusyCollecting then
             local target = chooseFruit()
             if target then
                 safeCollectFruit(target)
@@ -1650,7 +1956,14 @@ end)
 
 task.spawn(function()
     while Runtime.Running do
-        if State.AutoServerHop and not Runtime.Hopping then
+        if State.AutoRandomFruit then buyRandomFruit() end
+        task.wait(1)
+    end
+end)
+
+task.spawn(function()
+    while Runtime.Running do
+        if State.AutoServerHop and not Runtime.Hopping and not Runtime.EventBusy then
             scanEntireWorld()
             local root = characterRoot()
             if not Runtime.TeamReady or not root or Runtime.BusyCollecting
