@@ -14,9 +14,9 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 local Backpack = LocalPlayer:WaitForChild("Backpack")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes", 15)
-assert(Remotes, "[Lapo Fruit Hub] Pasta Remotes nao encontrada.")
+assert(Remotes, "[Lapo Fruit Hub] Remotes folder not found.")
 local CommF_ = Remotes:WaitForChild("CommF_", 15)
-assert(CommF_, "[Lapo Fruit Hub] Remote CommF_ nao encontrado.")
+assert(CommF_, "[Lapo Fruit Hub] CommF_ remote not found.")
 
 local Environment = (getgenv and getgenv()) or _G
 if Environment.LapoFruitHub and Environment.LapoFruitHub.Destroy then
@@ -31,7 +31,7 @@ local HasExternalConfig = next(ExternalConfig) ~= nil
 local loaded, Library = pcall(function()
     return loadstring(game:HttpGet(LIBRARY_URL))()
 end)
-assert(loaded and Library, "[Lapo Fruit Hub] Falha ao carregar a Lapo X2: " .. tostring(Library))
+assert(loaded and Library, "[Lapo Fruit Hub] Failed to load Lapo X2: " .. tostring(Library))
 
 local Window = Library:New({ Id = "lapo-fruit-hub" })
 local Connections = {}
@@ -288,7 +288,8 @@ local FALLBACK_FRUITS = {
     "Sound-Sound", "Phoenix-Phoenix", "Portal-Portal", "Rumble-Rumble", "Pain-Pain",
     "Blizzard-Blizzard", "Gravity-Gravity", "Mammoth-Mammoth", "T-Rex-T-Rex",
     "Dough-Dough", "Shadow-Shadow", "Venom-Venom", "Control-Control", "Gas-Gas",
-    "Spirit-Spirit", "Leopard-Leopard", "Tiger-Tiger", "Yeti-Yeti", "Kitsune-Kitsune", "Dragon-Dragon",
+    "Spirit-Spirit", "Leopard-Leopard", "Tiger-Tiger", "Yeti-Yeti", "Magnet-Magnet",
+    "Kitsune-Kitsune", "Dragon-Dragon"
 }
 
 local function connect(signal, callback)
@@ -320,7 +321,7 @@ local function normalize(text)
 end
 
 local function prettyFruitName(storageName)
-    local name = tostring(storageName or "Fruta")
+    local name = tostring(storageName or "Fruit")
     name = name:gsub(" Fruit$", "")
     if #name % 2 == 1 then
         local middle = (#name + 1) / 2
@@ -553,6 +554,11 @@ end
 
 local function unregisterWorldFruit(tool)
     removeEsp(tool)
+    TrackedWorldFruits[tool] = nil
+    PendingWorldFruits[tool] = nil
+    IgnoredWorldFruits[tool] = nil
+    FailedUntil[tool] = nil
+    FailureCount[tool] = nil
 end
 
 local function refreshCatalog()
@@ -576,7 +582,7 @@ local function refreshCatalog()
             end
         end
     end
-    if #nextCatalog == 0 then return false, "catalogo vazio" end
+    if #nextCatalog == 0 then return false, "empty catalog" end
 
     table.sort(nextCatalog, function(a, b)
         if a.Price == b.Price then return a.DisplayName < b.DisplayName end
@@ -646,7 +652,7 @@ end
 
 local function queueWebhook(eventName, fruitName, value, detail, force)
     if not force then
-        if eventName ~= "Guardada" or not State.WebhookEnabled or not State.WebhookStored then return end
+        if eventName ~= "Stored" or not State.WebhookEnabled or not State.WebhookStored then return end
         if value < State.WebhookMinimumValue then return end
     end
     table.insert(WebhookQueue, {
@@ -660,9 +666,9 @@ end
 
 local function sendWebhook(entry)
     local url = State.WebhookUrl:gsub("%s+", "")
-    if not validWebhook(url) then return false, "URL de webhook do Discord invalida" end
+    if not validWebhook(url) then return false, "Invalid Discord webhook URL" end
     local send = requestFunction()
-    if not send then return false, "executor sem funcao request" end
+    if not send then return false, "executor missing request function" end
 
     local mention = ""
     local allowedMentions = { parse = {} }
@@ -678,15 +684,15 @@ local function sendWebhook(entry)
     end
 
     local fields = {
-        { name = "Fruta", value = prettyFruitName(entry.Fruit), inline = true },
-        { name = "Valor", value = "$" .. comma(entry.Value), inline = true },
-        { name = "Evento", value = entry.Event, inline = true },
-        { name = "Jogador", value = LocalPlayer.Name .. " (" .. LocalPlayer.DisplayName .. ")", inline = true },
-        { name = "Mar", value = seaName(), inline = true },
-        { name = "Detalhe", value = tostring(entry.Detail):sub(1, 900), inline = false },
+        { name = "Fruit", value = prettyFruitName(entry.Fruit), inline = true },
+        { name = "Value", value = "$" .. comma(entry.Value), inline = true },
+        { name = "Event", value = entry.Event, inline = true },
+        { name = "Player", value = LocalPlayer.Name .. " (" .. LocalPlayer.DisplayName .. ")", inline = true },
+        { name = "Sea", value = seaName(), inline = true },
+        { name = "Detail", value = tostring(entry.Detail):sub(1, 900), inline = false },
     }
     if State.WebhookIncludeServer then
-        table.insert(fields, { name = "Servidor", value = "`" .. tostring(game.JobId) .. "`", inline = false })
+        table.insert(fields, { name = "Server", value = "`" .. tostring(game.JobId) .. "`", inline = false })
     end
 
     local body = HttpService:JSONEncode({
@@ -695,7 +701,7 @@ local function sendWebhook(entry)
         allowed_mentions = allowedMentions,
         embeds = {{
             title = "Fruit " .. entry.Event,
-            color = entry.Event == "Guardada" and 5763719 or (entry.Event == "Comprada" and 16763904 or 8317335),
+            color = entry.Event == "Stored" and 5763719 or (entry.Event == "Purchased" and 16763904 or 8317335),
             fields = fields,
             footer = { text = "Lapo Fruit Hub v" .. HUB_VERSION },
             timestamp = DateTime.now():ToIsoDate(),
@@ -718,7 +724,7 @@ local function shouldAutoStore()
     return State.AutoStore or State.AutoServerHop
 end
 
-local function storeFruit(tool, forceRetry)
+local function storeFruitInner(tool, forceRetry)
     if not Runtime.Running or not isFruit(tool) or not isOwned(tool) then return false end
     local previous = StoreStatus[tool]
     if previous == "stored" then return true end
@@ -729,7 +735,8 @@ local function storeFruit(tool, forceRetry)
     end
 
     StoreStatus[tool] = "pending"
-    while Runtime.BusyStoring and Runtime.Running do task.wait(0.1) end
+    local waitGuard = os.clock() + 10
+    while Runtime.BusyStoring and Runtime.Running and os.clock() < waitGuard do task.wait(0.1) end
     if not Runtime.Running or not isOwned(tool) then return false end
     Runtime.BusyStoring = true
     Runtime.StorageWorkers = Runtime.StorageWorkers + 1
@@ -756,10 +763,22 @@ local function storeFruit(tool, forceRetry)
     Runtime.StorageWorkers = math.max(0, Runtime.StorageWorkers - 1)
     Runtime.BusyStoring = false
     if stored then
-        queueWebhook("Guardada", storageName, fruitValue(storageName), "Armazenada automaticamente")
+        queueWebhook("Stored", storageName, fruitValue(storageName), "Stored automatically")
         return true
     end
     return false
+end
+
+local function storeFruit(tool, forceRetry)
+    local ok, result = pcall(storeFruitInner, tool, forceRetry)
+    if not ok then
+        warn("[Lapo Fruit Hub] storeFruit error: " .. tostring(result))
+        Runtime.StorageWorkers = math.max(0, (Runtime.StorageWorkers or 1) - 1)
+        Runtime.BusyStoring = false
+        if StoreStatus[tool] == "working" then StoreStatus[tool] = "failed" end
+        return false
+    end
+    return result
 end
 
 local function onOwnedFruit(tool)
@@ -799,8 +818,12 @@ local function chooseFruit()
 end
 
 local function hasWorldFruitToProcess()
+    local now = os.clock()
     for tool in pairs(TrackedWorldFruits) do
-        if worldContains(tool) and fruitAllowed(tool) and not IgnoredWorldFruits[tool] then return true end
+        if worldContains(tool) and fruitAllowed(tool) and not IgnoredWorldFruits[tool]
+            and (not FailedUntil[tool] or FailedUntil[tool] <= now) then
+            return true
+        end
     end
     for tool in pairs(PendingWorldFruits) do
         if worldContains(tool) then return true end
@@ -919,7 +942,7 @@ end
 
 local function tweenSegment(root, humanoid, character, generation, tool, position, manual)
     if not movementEnabled(manual) or not movementCharacterValid(character, humanoid, generation)
-        or not worldContains(tool) then return false, "interrompido" end
+        or not worldContains(tool) then return false, "interrupted" end
     local distance = (root.Position - position).Magnitude
     if distance <= 4 then
         pivotCharacterTo(character, position)
@@ -965,13 +988,13 @@ local function tweenSegment(root, humanoid, character, generation, tool, positio
     end
     if Runtime.CurrentTween == tween then Runtime.CurrentTween = nil end
     if not movementCharacterValid(character, humanoid, generation) then return false, "respawn" end
-    if not movementEnabled(manual) or not worldContains(tool) then return false, "interrompido" end
-    return (root.Position - position).Magnitude <= 20, "correcao de posicao"
+    if not movementEnabled(manual) or not worldContains(tool) then return false, "interrupted" end
+    return (root.Position - position).Magnitude <= 20, "position correction"
 end
 
 local function moveToFruit(tool, root, humanoid, character, generation, manual)
     local handle = fruitHandle(tool)
-    if not handle then return false, "fruta sem Handle" end
+    if not handle then return false, "fruit without Handle" end
     local start = root.Position
     local destination = handle.Position + Vector3.new(0, 3, 0)
     local horizontalDistance = (Vector3.new(start.X, 0, start.Z) - Vector3.new(destination.X, 0, destination.Z)).Magnitude
@@ -986,7 +1009,7 @@ local function moveToFruit(tool, root, humanoid, character, generation, manual)
 
     for _, waypoint in ipairs(route) do
         local reached, reason = tweenSegment(root, humanoid, character, generation, tool, waypoint, manual)
-        if not reached then
+        if not reached and waypoint == destination and reason == "position correction" then
             reached, reason = tweenSegment(root, humanoid, character, generation, tool, waypoint, manual)
         end
         if not reached then return false, reason end
@@ -1022,6 +1045,7 @@ local function collectFruit(tool, manual)
         local pickupDeadline = os.clock() + State.PickupTimeout
         repeat
             if not worldContains(tool) or not handle.Parent or not movementCharacterValid(character, humanoid, generation) then break end
+            if AcquiredByUs[tool] or isOwned(tool) then break end
             finalPosition = handle.Position + Vector3.new(0, 1.5, 0)
             pivotCharacterTo(character, finalPosition)
             touchFruit(tool, root, handle)
@@ -1036,6 +1060,7 @@ local function collectFruit(tool, manual)
         if FailureCount[tool] >= 3 then IgnoredWorldFruits[tool] = true end
     elseif success then
         FailureCount[tool] = nil
+        FailedUntil[tool] = nil
     end
     Runtime.CurrentTarget = nil
     if success and shouldAutoStore() and isOwned(tool) then
@@ -1052,7 +1077,10 @@ local function collectFruit(tool, manual)
     stopMovementGuard()
     if humanoid.Parent then humanoid.AutoRotate = oldAutoRotate end
     Runtime.BusyCollecting = false
-    Runtime.NoFruitSince = os.clock()
+    if success then
+        Runtime.NoFruitSince = os.clock()
+        Runtime.EmptyScanCount = 0
+    end
     return success
 end
 
@@ -1378,79 +1406,124 @@ local function runSniper()
 end
 
 local function getJson(url)
-    local ok, body = pcall(function() return game:HttpGet(url) end)
-    if not ok then
-        local send = requestFunction()
-        if not send then return false, tostring(body) end
+    local body = nil
+    local lastErr = nil
+    local send = requestFunction()
+    if send then
         local requested, response = pcall(send, { Url = url, Method = "GET" })
-        if not requested or type(response) ~= "table" then return false, tostring(response) end
-        local code = tonumber(response.StatusCode or response.Status or response.status_code) or 0
-        if code < 200 or code >= 300 then return false, "HTTP " .. tostring(code) end
-        body = response.Body or response.body
+        if requested and type(response) == "table" then
+            local code = tonumber(response.StatusCode or response.Status or response.status_code) or 0
+            if code == 429 then
+                return false, "HTTP 429 rate-limit"
+            elseif code >= 200 and code < 300 then
+                body = response.Body or response.body
+            else
+                lastErr = "HTTP " .. tostring(code)
+            end
+        else
+            lastErr = tostring(response)
+        end
+    end
+    if type(body) ~= "string" or body == "" then
+        local ok, result = pcall(function() return game:HttpGet(url) end)
+        if ok and type(result) == "string" and result ~= "" then
+            body = result
+        else
+            return false, tostring(lastErr or result or "http failed")
+        end
     end
     local decoded, data = pcall(HttpService.JSONDecode, HttpService, body)
-    if not decoded or type(data) ~= "table" then return false, "resposta de servidores invalida" end
+    if not decoded or type(data) ~= "table" then return false, "invalid server response" end
     return true, data
+end
+
+local function queueHopScript()
+    local loader = buildConfigLoader()
+    local queue = (queue_on_teleport or (syn and syn.queue_on_teleport) or (fluxus and fluxus.queue_on_teleport))
+    if type(queue) == "function" then
+        pcall(queue, loader)
+    elseif type(getgenv) == "function" then
+        pcall(function()
+            local env = getgenv()
+            env.LapoFruitConfig = configSnapshot()
+        end)
+    end
 end
 
 local function findServer(skipVisited)
     local cursor = nil
     local candidates = {}
     local sortOrder = HopRandom:NextInteger(0, 1) == 0 and "Asc" or "Desc"
-    for _ = 1, State.HopPages do
+    local pages = math.clamp(math.floor(tonumber(State.HopPages) or 3), 1, 10)
+    for _ = 1, pages do
         local url = string.format(
             "https://games.roblox.com/v1/games/%s/servers/Public?sortOrder=%s&excludeFullGames=true&limit=100",
             tostring(game.PlaceId), sortOrder
         )
         if cursor and cursor ~= "" then url = url .. "&cursor=" .. HttpService:UrlEncode(cursor) end
         local ok, page = getJson(url)
-        if not ok then return nil, page end
+        if not ok then
+            if #candidates > 0 then break end
+            return nil, page
+        end
         for _, server in ipairs(page.data or {}) do
             local id = tostring(server.id or "")
             local playing = tonumber(server.playing) or math.huge
             local maximum = tonumber(server.maxPlayers) or 0
-            if id ~= "" and id ~= game.JobId and playing < maximum and (not skipVisited or not VisitedServers[id]) then
+            if id ~= "" and id ~= game.JobId and maximum > 0 and playing < maximum
+                and (not skipVisited or not VisitedServers[id]) then
                 table.insert(candidates, { Id = id, Playing = playing })
             end
         end
         cursor = page.nextPageCursor
         if not cursor or cursor == "" then break end
+        task.wait(0.1)
     end
-    if #candidates == 0 then return nil, "nenhum servidor disponivel" end
+    if #candidates == 0 then return nil, "no servers available" end
     return candidates[HopRandom:NextInteger(1, #candidates)]
 end
 
 local function scheduleHopRetry()
-    if Runtime.RetryScheduled or not Runtime.Running then return end
-    local attempt = Runtime.HopAttempt
+    if Runtime.RetryScheduled then return end
+    local attempt = Runtime.HopAttempt or 0
     local mayRetry = Runtime.HopManual or State.AutoServerHop
     Runtime.Hopping = false
     Runtime.ActiveHopId = nil
+    if not Runtime.Running then
+        Runtime.RetryScheduled = false
+        return
+    end
     if not mayRetry then
         Runtime.HopAttempt = 0
         Runtime.HopManual = false
         Runtime.NoFruitSince = os.clock()
         return
     end
-    local refreshAfter = math.max(1, math.floor(tonumber(State.HopRetries) or 1))
+    local refreshAfter = math.max(1, math.floor(tonumber(State.HopRetries) or 8))
     if attempt >= refreshAfter then
         table.clear(VisitedServers)
         VisitedServers[game.JobId] = true
+        attempt = 0
+        Runtime.HopAttempt = 0
     end
 
     Runtime.RetryScheduled = true
     local delaySeconds = HopRandom:NextNumber(0.7, 2.4)
     task.delay(delaySeconds, function()
-        if not Runtime.Running then return end
         Runtime.RetryScheduled = false
-        serverHop(Runtime.HopManual, attempt + 1)
+        if not Runtime.Running then return end
+        if not (Runtime.HopManual or State.AutoServerHop) then return end
+        local ok, err = pcall(serverHop, Runtime.HopManual, attempt + 1)
+        if not ok then
+            warn("[Lapo Fruit Hub] Hop failed: " .. tostring(err))
+            scheduleHopRetry()
+        end
     end)
 end
 
 serverHop = function(manual, attempt)
     if Runtime.Hopping or Runtime.RetryScheduled or not Runtime.Running then return false end
     if not manual and not State.AutoServerHop then return false end
-    if not manual and not Runtime.TeamReady then return false end
     if not manual and not attempt and os.clock() - Runtime.LastHopAttempt < 8 then return false end
     if not manual then
         scanEntireWorld()
@@ -1491,287 +1564,514 @@ serverHop = function(manual, attempt)
 
     VisitedServers[server.Id] = true
     pcall(function() Window:SaveProfile("default") end)
+    pcall(queueHopScript)
+    if Runtime.CurrentTween then pcall(function() Runtime.CurrentTween:Cancel() end) end
+    Runtime.CurrentTween = nil
     Runtime.ActiveHopId = server.Id
     local activeId = server.Id
-    task.delay(HopRandom:NextNumber(8, 11), function()
-        if Runtime.Running and Runtime.Hopping and Runtime.ActiveHopId == activeId then
+    task.delay(10, function()
+        if Runtime.Running and Runtime.Hopping and Runtime.ActiveHopId == activeId and game.JobId ~= activeId then
             scheduleHopRetry()
         end
     end)
 
-    local browser = ReplicatedStorage:FindFirstChild("__ServerBrowser")
-        or ReplicatedStorage:WaitForChild("__ServerBrowser", 5)
-    if not browser or not browser:IsA("RemoteFunction") then
-        scheduleHopRetry()
-        return false
-    end
-    local ok, result = pcall(function()
-        return browser:InvokeServer("teleport", server.Id)
+    local ok, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, server.Id, LocalPlayer)
     end)
-    if not ok or result == false then
+    if not ok then
+        warn("[Lapo Fruit Hub] Teleport failed: " .. tostring(err))
         scheduleHopRetry()
         return false
     end
     return true
 end
 
-local FruitTab = Window:Tab({ name = "Fruit", icon = "F" })
-local ConfigTab = Window:Tab({ name = "Config", icon = "C" })
+local FarmTab = Window:Tab({ name = "Farm", icon = "F" })
+local ShopTab = Window:Tab({ name = "Shop", icon = "S" })
+local HopTab = Window:Tab({ name = "Hop", icon = "H" })
+local EventsTab = Window:Tab({ name = "Events", icon = "E" })
+local SettingsTab = Window:Tab({ name = "Settings", icon = "C" })
 local WebhookTab = Window:Tab({ name = "Webhook", icon = "W" })
 
-FruitTab:Section({ id = "collection", text = "Coleta", expanded = true, persist = false })
-Controls.AutoCollect = FruitTab:Toggle({
-    id = "auto-collect", section = "collection", text = "Auto coletar frutas",
+FarmTab:Section({ id = "collection", text = "Collection", expanded = true, persist = false })
+Controls.AutoCollect = FarmTab:Toggle({
+    id = "auto-collect",
+    section = "collection",
+    text = "Auto Collect",
     default = State.AutoCollect,
     callback = function(value)
         State.AutoCollect = value
-        if not value and not State.AutoServerHop and Runtime.CurrentTween then Runtime.CurrentTween:Cancel() end
+        if not value and not State.AutoServerHop and Runtime.CurrentTween then
+            Runtime.CurrentTween:Cancel()
+        end
     end,
 })
-Controls.AutoStore = FruitTab:Toggle({
-    id = "auto-store", section = "collection", text = "Auto guardar frutas",
+Controls.AutoStore = FarmTab:Toggle({
+    id = "auto-store",
+    section = "collection",
+    text = "Auto Store",
     default = State.AutoStore,
     callback = function(value)
         State.AutoStore = value
-        if value then task.spawn(storeInventory) end
+        if value then
+            task.spawn(storeInventory)
+        end
     end,
 })
-Controls.EspFruit = FruitTab:Toggle({
-    id = "esp-fruit", section = "collection", text = "ESP de frutas", default = State.EspFruit,
-    callback = function(value) State.EspFruit = value; refreshAllEsp() end,
+Controls.EspFruit = FarmTab:Toggle({
+    id = "esp-fruit",
+    section = "collection",
+    text = "Fruit ESP",
+    default = State.EspFruit,
+    callback = function(value)
+        State.EspFruit = value
+        refreshAllEsp()
+    end,
 })
-Controls.FilterMode = FruitTab:Dropdown({
-    id = "filter-mode", section = "collection", text = "Filtro de coleta",
-    options = {{ value = "all", label = "Todas" }, { value = "selected", label = "Somente selecionadas" }},
-    default = State.FilterMode, valueDefault = true,
-    callback = function(_, value) State.FilterMode = value end,
+
+FarmTab:Section({ id = "filters", text = "Filters", expanded = true, persist = false })
+Controls.FilterMode = FarmTab:Dropdown({
+    id = "filter-mode",
+    section = "filters",
+    text = "Collect Filter",
+    options = {
+        { value = "all", label = "All" },
+        { value = "selected", label = "Selected Only" },
+    },
+    default = State.FilterMode,
+    valueDefault = true,
+    callback = function(_, value)
+        State.FilterMode = value
+    end,
 })
-Controls.SelectedFruits = FruitTab:Dropdown({
-    id = "selected-fruits", section = "collection", text = "Frutas selecionadas",
-    options = fallbackOptions(), multiple = true, default = copyStringArray(State.SelectedFruits) or {},
+Controls.SelectedFruits = FarmTab:Dropdown({
+    id = "selected-fruits",
+    section = "filters",
+    text = "Selected Fruits",
+    options = fallbackOptions(),
+    multiple = true,
+    default = copyStringArray(State.SelectedFruits) or {},
     dependsOn = { id = "filter-mode", equals = "selected" },
-    callback = function(value) State.SelectedFruits = value end,
+    callback = function(value)
+        State.SelectedFruits = value
+    end,
 })
-Controls.MinimumValue = FruitTab:NumberInput({
-    id = "minimum-value", section = "collection", text = "Valor minimo para coletar",
-    min = 0, max = 100000000, step = 50000, default = State.MinimumValue,
-    callback = function(value) State.MinimumValue = value end,
+Controls.MinimumValue = FarmTab:NumberInput({
+    id = "minimum-value",
+    section = "filters",
+    text = "Minimum Value",
+    min = 0,
+    max = 100000000,
+    step = 50000,
+    default = State.MinimumValue,
+    callback = function(value)
+        State.MinimumValue = value
+    end,
 })
-Controls.Priority = FruitTab:Dropdown({
-    id = "priority", section = "collection", text = "Prioridade",
-    options = {{ value = "value", label = "Maior valor" }, { value = "nearest", label = "Mais proxima" }},
-    default = State.Priority, valueDefault = true,
-    callback = function(_, value) State.Priority = value end,
+Controls.Priority = FarmTab:Dropdown({
+    id = "priority",
+    section = "filters",
+    text = "Priority",
+    options = {
+        { value = "value", label = "Highest Value" },
+        { value = "nearest", label = "Nearest" },
+    },
+    default = State.Priority,
+    valueDefault = true,
+    callback = function(_, value)
+        State.Priority = value
+    end,
 })
-FruitTab:Button({
-    section = "collection", text = "Coletar uma fruta agora",
+
+FarmTab:Section({ id = "actions", text = "Actions", expanded = false, persist = false })
+FarmTab:Button({
+    section = "actions",
+    text = "Collect One Now",
     callback = function()
         local target = chooseFruit()
-        if target then task.spawn(safeCollectFruit, target, true) end
+        if target then
+            task.spawn(safeCollectFruit, target, true)
+        end
     end,
 })
-FruitTab:Button({ section = "collection", text = "Guardar frutas do inventario", callback = function() task.spawn(storeInventory) end })
+FarmTab:Button({
+    section = "actions",
+    text = "Store Inventory",
+    callback = function()
+        task.spawn(storeInventory)
+    end,
+})
 
-FruitTab:Section({ id = "events", text = "Eventos", expanded = true, persist = false })
-Controls.AutoRaidFactory = FruitTab:Toggle({
-    id = "auto-raid-factory", section = "events", text = "Auto Pirate Raid / Factory",
+EventsTab:Section({ id = "events", text = "Raid / Factory", expanded = true, persist = false })
+Controls.AutoRaidFactory = EventsTab:Toggle({
+    id = "auto-raid-factory",
+    section = "events",
+    text = "Auto Pirate Raid / Factory",
     default = State.AutoRaidFactory,
     callback = function(value)
         State.AutoRaidFactory = value
-        if not value and stopEventAutomation then stopEventAutomation() end
+        if not value and stopEventAutomation then
+            stopEventAutomation()
+        end
     end,
 })
 
-FruitTab:Section({ id = "random-fruit", text = "Random Fruit", expanded = true, persist = false })
-Controls.AutoRandomFruit = FruitTab:Toggle({
-    id = "auto-random-fruit", section = "random-fruit", text = "Auto Random Fruit",
-    default = State.AutoRandomFruit,
-    callback = function(value) State.AutoRandomFruit = value end,
-})
-
-FruitTab:Section({ id = "shop", text = "Loja e Gacha", expanded = true, persist = false })
-FruitTab:Button({
-    section = "shop", text = "Atualizar catalogo/estoque",
+ShopTab:Section({ id = "stock", text = "Stock", expanded = true, persist = false })
+ShopTab:Button({
+    section = "stock",
+    text = "Refresh Catalog",
     callback = function()
-        task.spawn(function()
-            refreshCatalog()
-        end)
+        task.spawn(refreshCatalog)
     end,
 })
-Controls.SniperTargets = FruitTab:Dropdown({
-    id = "sniper-targets", section = "shop", text = "Alvos do sniper",
-    options = fallbackOptions(), multiple = true, default = copyStringArray(State.SniperTargets) or {},
-    callback = function(value) State.SniperTargets = value end,
+
+ShopTab:Section({ id = "sniper", text = "Sniper", expanded = true, persist = false })
+Controls.SniperTargets = ShopTab:Dropdown({
+    id = "sniper-targets",
+    section = "sniper",
+    text = "Sniper Targets",
+    options = fallbackOptions(),
+    multiple = true,
+    default = copyStringArray(State.SniperTargets) or {},
+    callback = function(value)
+        State.SniperTargets = value
+    end,
 })
-Controls.AutoSniper = FruitTab:Toggle({
-    id = "auto-sniper", section = "shop", text = "Auto comprar quando houver estoque",
-    default = State.AutoSniper, callback = function(value) State.AutoSniper = value end,
+Controls.AutoSniper = ShopTab:Toggle({
+    id = "auto-sniper",
+    section = "sniper",
+    text = "Auto Buy On Stock",
+    default = State.AutoSniper,
+    callback = function(value)
+        State.AutoSniper = value
+    end,
 })
-Controls.SniperInterval = FruitTab:Slider({
-    id = "sniper-interval", section = "shop", text = "Intervalo do sniper (segundos)",
-    min = 10, max = 120, step = 5, default = State.SniperInterval,
-    callback = function(value) State.SniperInterval = value end,
+Controls.SniperInterval = ShopTab:Slider({
+    id = "sniper-interval",
+    section = "sniper",
+    text = "Sniper Interval (s)",
+    min = 10,
+    max = 120,
+    step = 5,
+    default = State.SniperInterval,
+    callback = function(value)
+        State.SniperInterval = value
+    end,
 })
 
-FruitTab:Section({ id = "server-hop", text = "Server Hop", expanded = true, persist = false })
-Controls.AutoServerHop = FruitTab:Toggle({
-    id = "auto-server-hop", section = "server-hop", text = "Auto Server Hop",
+ShopTab:Section({ id = "random-fruit", text = "Random", expanded = false, persist = false })
+Controls.AutoRandomFruit = ShopTab:Toggle({
+    id = "auto-random-fruit",
+    section = "random-fruit",
+    text = "Auto Random Fruit",
+    default = State.AutoRandomFruit,
+    callback = function(value)
+        State.AutoRandomFruit = value
+    end,
+})
+
+HopTab:Section({ id = "server-hop", text = "Server Hop", expanded = true, persist = false })
+Controls.AutoServerHop = HopTab:Toggle({
+    id = "auto-server-hop",
+    section = "server-hop",
+    text = "Auto Server Hop",
     default = State.AutoServerHop,
     callback = function(value)
         State.AutoServerHop = value
         Runtime.NoFruitSince = os.clock()
-        if value then task.spawn(storeInventory) end
+        if value then
+            task.spawn(storeInventory)
+        end
     end,
 })
-Controls.HopAfter = FruitTab:Slider({
-    id = "hop-after", section = "server-hop", text = "Trocar apos ficar sem fruta (segundos)",
-    min = 5, max = 120, step = 5, default = State.HopAfter,
-    callback = function(value) State.HopAfter = value; Runtime.NoFruitSince = os.clock() end,
+Controls.HopAfter = HopTab:Slider({
+    id = "hop-after",
+    section = "server-hop",
+    text = "Hop After No Fruit (s)",
+    min = 5,
+    max = 120,
+    step = 5,
+    default = State.HopAfter,
+    callback = function(value)
+        State.HopAfter = value
+        Runtime.NoFruitSince = os.clock()
+    end,
 })
-Controls.HopPages = FruitTab:Slider({
-    id = "hop-pages", section = "server-hop", text = "Paginas de servidores",
-    min = 1, max = 10, step = 1, default = State.HopPages,
-    callback = function(value) State.HopPages = value end,
+Controls.HopPages = HopTab:Slider({
+    id = "hop-pages",
+    section = "server-hop",
+    text = "Server Pages",
+    min = 1,
+    max = 10,
+    step = 1,
+    default = State.HopPages,
+    callback = function(value)
+        State.HopPages = value
+    end,
 })
-Controls.HopRetries = FruitTab:Slider({
-    id = "hop-retries", section = "server-hop", text = "Tentativas com servidores diferentes",
-    min = 2, max = 20, step = 1, default = State.HopRetries,
-    callback = function(value) State.HopRetries = value end,
+Controls.HopRetries = HopTab:Slider({
+    id = "hop-retries",
+    section = "server-hop",
+    text = "Retries Before Reset",
+    min = 2,
+    max = 20,
+    step = 1,
+    default = State.HopRetries,
+    callback = function(value)
+        State.HopRetries = value
+    end,
 })
-FruitTab:Button({
-    section = "server-hop", text = "Server Hop agora",
-    callback = function() task.spawn(serverHop, true) end,
+HopTab:Button({
+    section = "server-hop",
+    text = "Hop Now",
+    callback = function()
+        task.spawn(serverHop, true)
+    end,
 })
 
-ConfigTab:Section({ id = "movement", text = "Movimento e desempenho", expanded = true, persist = false })
-Controls.Movement = ConfigTab:Dropdown({
-    id = "movement-method", section = "movement", text = "Metodo de movimento",
-    options = {{ value = "tween", label = "Tween (recomendado)" }, { value = "instant", label = "Instantaneo" }},
-    default = State.Movement, valueDefault = true,
-    callback = function(_, value) State.Movement = value end,
+SettingsTab:Section({ id = "movement", text = "Movement", expanded = true, persist = false })
+Controls.Movement = SettingsTab:Dropdown({
+    id = "movement-method",
+    section = "movement",
+    text = "Movement Method",
+    options = {
+        { value = "tween", label = "Tween (Recommended)" },
+        { value = "instant", label = "Instant" },
+    },
+    default = State.Movement,
+    valueDefault = true,
+    callback = function(_, value)
+        State.Movement = value
+    end,
 })
-Controls.TweenSpeed = ConfigTab:Slider({
-    id = "tween-speed", section = "movement", text = "Velocidade do Tween",
-    min = 200, max = 1000, step = 50, default = State.TweenSpeed,
+Controls.TweenSpeed = SettingsTab:Slider({
+    id = "tween-speed",
+    section = "movement",
+    text = "Tween Speed",
+    min = 200,
+    max = 1000,
+    step = 50,
+    default = State.TweenSpeed,
     dependsOn = { id = "movement-method", equals = "tween" },
-    callback = function(value) State.TweenSpeed = value end,
-})
-Controls.ScanInterval = ConfigTab:Slider({
-    id = "scan-interval", section = "movement", text = "Intervalo de busca (segundos)",
-    min = 0.1, max = 1, step = 0.1, default = State.ScanInterval,
-    callback = function(value) State.ScanInterval = value end,
-})
-Controls.PickupTimeout = ConfigTab:Slider({
-    id = "pickup-timeout", section = "movement", text = "Timeout de coleta (segundos)",
-    min = 5, max = 30, step = 1, default = State.PickupTimeout,
-    callback = function(value) State.PickupTimeout = value end,
-})
-Controls.StoreDelay = ConfigTab:Slider({
-    id = "store-delay", section = "movement", text = "Espera antes de guardar",
-    min = 0.1, max = 3, step = 0.05, default = State.StoreDelay,
-    callback = function(value) State.StoreDelay = value end,
-})
-Controls.AntiIdle = ConfigTab:Toggle({
-    id = "anti-idle", section = "movement", text = "Anti-AFK",
-    default = State.AntiIdle, callback = function(value) State.AntiIdle = value end,
+    callback = function(value)
+        State.TweenSpeed = value
+    end,
 })
 
-ConfigTab:Section({ id = "profiles", text = "Perfil", expanded = true, persist = false })
-Controls.ProfileName = ConfigTab:TextBox({
-    id = "profile-name", section = "profiles", text = "Nome do perfil", default = "default", persist = false,
-    placeholder = "default", callback = function(value) State.ProfileName = value ~= "" and value or "default" end,
+SettingsTab:Section({ id = "performance", text = "Performance", expanded = false, persist = false })
+Controls.ScanInterval = SettingsTab:Slider({
+    id = "scan-interval",
+    section = "performance",
+    text = "Scan Interval (s)",
+    min = 0.1,
+    max = 1,
+    step = 0.1,
+    default = State.ScanInterval,
+    callback = function(value)
+        State.ScanInterval = value
+    end,
 })
-ConfigTab:Button({
-    section = "profiles", text = "Salvar perfil agora",
+Controls.PickupTimeout = SettingsTab:Slider({
+    id = "pickup-timeout",
+    section = "performance",
+    text = "Pickup Timeout (s)",
+    min = 5,
+    max = 30,
+    step = 1,
+    default = State.PickupTimeout,
+    callback = function(value)
+        State.PickupTimeout = value
+    end,
+})
+Controls.StoreDelay = SettingsTab:Slider({
+    id = "store-delay",
+    section = "performance",
+    text = "Store Delay (s)",
+    min = 0.1,
+    max = 3,
+    step = 0.05,
+    default = State.StoreDelay,
+    callback = function(value)
+        State.StoreDelay = value
+    end,
+})
+Controls.AntiIdle = SettingsTab:Toggle({
+    id = "anti-idle",
+    section = "performance",
+    text = "Anti-AFK",
+    default = State.AntiIdle,
+    callback = function(value)
+        State.AntiIdle = value
+    end,
+})
+
+SettingsTab:Section({ id = "profiles", text = "Profiles", expanded = false, persist = false })
+Controls.ProfileName = SettingsTab:TextBox({
+    id = "profile-name",
+    section = "profiles",
+    text = "Profile Name",
+    default = "default",
+    persist = false,
+    placeholder = "default",
+    callback = function(value)
+        State.ProfileName = value ~= "" and value or "default"
+    end,
+})
+SettingsTab:Button({
+    section = "profiles",
+    text = "Save Profile",
     callback = function()
         Window:SaveProfile(State.ProfileName)
     end,
 })
-ConfigTab:Button({
-    section = "profiles", text = "Carregar perfil",
+SettingsTab:Button({
+    section = "profiles",
+    text = "Load Profile",
     callback = function()
         local ok = Window:LoadProfile(State.ProfileName)
         if ok and syncStateFromControls then
             syncStateFromControls()
-            if HasExternalConfig then applyExternalConfig(ExternalConfig) end
+            if HasExternalConfig then
+                applyExternalConfig(ExternalConfig)
+            end
         end
     end,
 })
-ConfigTab:Button({
-    section = "profiles", text = "Copiar config JSON",
+SettingsTab:Button({
+    section = "profiles",
+    text = "Copy Config JSON",
     callback = function()
-        local ok, data = pcall(function() return HttpService:JSONEncode(Window:ExportProfile()) end)
-        if not ok then return end
+        local ok, data = pcall(function()
+            return HttpService:JSONEncode(Window:ExportProfile())
+        end)
+        if not ok then
+            return
+        end
         Window:Copy(data)
     end,
 })
-ConfigTab:Button({
-    section = "profiles", text = "Exportar config para loadstring",
+SettingsTab:Button({
+    section = "profiles",
+    text = "Export Loadstring",
     callback = function()
         Window:Copy(buildConfigLoader())
     end,
 })
-ConfigTab:Button({
-    section = "profiles", text = "Descarregar hub",
+SettingsTab:Button({
+    section = "profiles",
+    text = "Unload Hub",
     callback = function()
-        if Environment.LapoFruitHub then Environment.LapoFruitHub.Destroy() end
+        if Environment.LapoFruitHub then
+            Environment.LapoFruitHub.Destroy()
+        end
     end,
 })
 
 WebhookTab:Section({ id = "webhook-main", text = "Webhook", expanded = true, persist = false })
 Controls.WebhookUrl = WebhookTab:TextBox({
-    id = "webhook-url", section = "webhook-main", text = "URL do Discord Webhook",
-    placeholder = "https://discord.com/api/webhooks/...", default = State.WebhookUrl,
+    id = "webhook-url",
+    section = "webhook-main",
+    text = "Discord Webhook URL",
+    placeholder = "https://discord.com/api/webhooks/...",
+    default = State.WebhookUrl,
     validate = function(value)
-        if value == "" or validWebhook(value:gsub("%s+", "")) then return true end
-        return false, "Use uma URL oficial discord.com/api/webhooks"
+        if value == "" or validWebhook(value:gsub("%s+", "")) then
+            return true
+        end
+        return false, "Use an official discord.com/api/webhooks URL"
     end,
-    callback = function(value) State.WebhookUrl = value end,
+    callback = function(value)
+        State.WebhookUrl = value
+    end,
 })
 Controls.WebhookEnabled = WebhookTab:Toggle({
-    id = "webhook-enabled", section = "webhook-main", text = "Ativar webhook",
-    default = State.WebhookEnabled, callback = function(value) State.WebhookEnabled = value end,
+    id = "webhook-enabled",
+    section = "webhook-main",
+    text = "Enable Webhook",
+    default = State.WebhookEnabled,
+    callback = function(value)
+        State.WebhookEnabled = value
+    end,
 })
 Controls.WebhookStored = WebhookTab:Toggle({
-    id = "webhook-stored", section = "webhook-main", text = "Avisar somente fruta guardada",
-    default = true, callback = function(value) State.WebhookStored = value end,
+    id = "webhook-stored",
+    section = "webhook-main",
+    text = "Notify Stored Only",
+    default = true,
+    callback = function(value)
+        State.WebhookStored = value
+    end,
 })
 Controls.WebhookMinimumValue = WebhookTab:NumberInput({
-    id = "webhook-minimum", section = "webhook-main", text = "Valor minimo para avisar",
-    min = 0, max = 100000000, step = 50000, default = State.WebhookMinimumValue,
-    callback = function(value) State.WebhookMinimumValue = value end,
+    id = "webhook-minimum",
+    section = "webhook-main",
+    text = "Minimum Value",
+    min = 0,
+    max = 100000000,
+    step = 50000,
+    default = State.WebhookMinimumValue,
+    callback = function(value)
+        State.WebhookMinimumValue = value
+    end,
 })
 Controls.WebhookIncludeServer = WebhookTab:Toggle({
-    id = "webhook-server", section = "webhook-main", text = "Incluir JobId do servidor",
-    default = State.WebhookIncludeServer, callback = function(value) State.WebhookIncludeServer = value end,
+    id = "webhook-server",
+    section = "webhook-main",
+    text = "Include Server JobId",
+    default = State.WebhookIncludeServer,
+    callback = function(value)
+        State.WebhookIncludeServer = value
+    end,
 })
 Controls.WebhookMention = WebhookTab:Dropdown({
-    id = "webhook-mention", section = "webhook-main", text = "Mencao",
+    id = "webhook-mention",
+    section = "webhook-main",
+    text = "Mention",
     options = {
-        { value = "none", label = "Nenhuma" },
-        { value = "user", label = "Usuario por ID" },
+        { value = "none", label = "None" },
+        { value = "user", label = "User By ID" },
         { value = "everyone", label = "@everyone" },
     },
-    default = State.WebhookMention, valueDefault = true,
-    callback = function(_, value) State.WebhookMention = value end,
+    default = State.WebhookMention,
+    valueDefault = true,
+    callback = function(_, value)
+        State.WebhookMention = value
+    end,
 })
 Controls.WebhookUserId = WebhookTab:TextBox({
-    id = "webhook-user-id", section = "webhook-main", text = "Discord User ID",
-    default = State.WebhookUserId, placeholder = "123456789...",
+    id = "webhook-user-id",
+    section = "webhook-main",
+    text = "Discord User ID",
+    default = State.WebhookUserId,
+    placeholder = "123456789...",
     dependsOn = { id = "webhook-mention", equals = "user" },
-    validate = function(value) return value == "" or value:match("^%d+$") ~= nil, "Use somente numeros" end,
-    callback = function(value) State.WebhookUserId = value end,
+    validate = function(value)
+        return value == "" or value:match("^%d+$") ~= nil, "Digits only"
+    end,
+    callback = function(value)
+        State.WebhookUserId = value
+    end,
 })
 Controls.WebhookInterval = WebhookTab:Slider({
-    id = "webhook-interval", section = "webhook-main", text = "Intervalo entre envios",
-    min = 1, max = 10, step = 0.5, default = State.WebhookInterval,
-    callback = function(value) State.WebhookInterval = value end,
+    id = "webhook-interval",
+    section = "webhook-main",
+    text = "Send Interval (s)",
+    min = 1,
+    max = 10,
+    step = 0.5,
+    default = State.WebhookInterval,
+    callback = function(value)
+        State.WebhookInterval = value
+    end,
 })
 WebhookTab:Button({
-    section = "webhook-main", text = "Testar webhook",
+    section = "webhook-main",
+    text = "Test Webhook",
     callback = function()
-        if State.WebhookUrl == "" then return end
-        queueWebhook("Teste", "Rocket-Rocket", 5000, "Webhook configurado corretamente", true)
+        if State.WebhookUrl == "" then
+            return
+        end
+        queueWebhook("Test", "Rocket-Rocket", 5000, "Webhook configured successfully", true)
     end,
 })
 
@@ -1866,6 +2166,11 @@ local function invalidateCharacterMovement()
     Runtime.EventTool = nil
     Runtime.CurrentTarget = nil
     Runtime.BusyCollecting = false
+    Runtime.BusyStoring = false
+    Runtime.StorageWorkers = 0
+    for tool, status in pairs(StoreStatus) do
+        if status == "working" then StoreStatus[tool] = "pending" end
+    end
     stopMovementGuard()
     Runtime.NoFruitSince = os.clock()
 end
@@ -1897,9 +2202,10 @@ connect(LocalPlayer.Idled, function()
         end)
     end
 end)
-connect(TeleportService.TeleportInitFailed, function(player)
+connect(TeleportService.TeleportInitFailed, function(player, result)
     if player ~= LocalPlayer then return end
-    if Runtime.Hopping then
+    warn("[Lapo Fruit Hub] TeleportInitFailed: " .. tostring(result))
+    if Runtime.Hopping or Runtime.HopManual or State.AutoServerHop then
         scheduleHopRetry()
     end
 end)
@@ -1919,10 +2225,22 @@ end)
 
 task.spawn(function()
     while Runtime.Running do
-        if State.AutoRaidFactory and Runtime.TeamReady and not Runtime.EventBusy
-            and not Runtime.BusyCollecting and not Runtime.Hopping then
-            local eventType = findActiveRaidFactory()
-            if eventType then runAutoRaidFactory() end
+        local ok, err = pcall(function()
+            if State.AutoRaidFactory and Runtime.TeamReady and not Runtime.EventBusy
+                and not Runtime.BusyCollecting and not Runtime.Hopping then
+                local eventType = findActiveRaidFactory()
+                if eventType then
+                    local rok, rerr = pcall(runAutoRaidFactory)
+                    if not rok then
+                        warn("[Lapo Fruit Hub] Raid/Factory error: " .. tostring(rerr))
+                        pcall(stopEventAutomation)
+                    end
+                end
+            end
+        end)
+        if not ok then
+            warn("[Lapo Fruit Hub] Raid loop error: " .. tostring(err))
+            pcall(stopEventAutomation)
         end
         task.wait(State.AutoRaidFactory and 0.25 or 0.75)
     end
@@ -1931,15 +2249,22 @@ end)
 task.spawn(function()
     task.spawn(refreshCatalog)
     while Runtime.Running do
-        if Runtime.TeamReady and not Runtime.EventBusy and (State.AutoCollect or State.AutoServerHop) and not Runtime.BusyCollecting then
-            local target = chooseFruit()
-            if target then
-                safeCollectFruit(target)
+        local ok, err = pcall(function()
+            if Runtime.TeamReady and not Runtime.EventBusy and (State.AutoCollect or State.AutoServerHop) and not Runtime.BusyCollecting then
+                local target = chooseFruit()
+                if target then
+                    safeCollectFruit(target)
+                else
+                    task.wait(State.ScanInterval)
+                end
             else
-                task.wait(State.ScanInterval)
+                task.wait(0.25)
             end
-        else
-            task.wait(0.25)
+        end)
+        if not ok then
+            warn("[Lapo Fruit Hub] Collect loop error: " .. tostring(err))
+            Runtime.BusyCollecting = false
+            task.wait(0.5)
         end
     end
 end)
@@ -1963,19 +2288,25 @@ end)
 
 task.spawn(function()
     while Runtime.Running do
-        if State.AutoServerHop and not Runtime.Hopping and not Runtime.EventBusy then
-            scanEntireWorld()
-            local root = characterRoot()
-            if not Runtime.TeamReady or not root or Runtime.BusyCollecting
-                or hasWorldFruitToProcess() or hasPendingStorage() then
-                Runtime.NoFruitSince = os.clock()
-                Runtime.EmptyScanCount = 0
-            else
-                Runtime.EmptyScanCount = Runtime.EmptyScanCount + 1
+        local ok, err = pcall(function()
+            if State.AutoServerHop and not Runtime.Hopping and not Runtime.RetryScheduled and not Runtime.EventBusy then
+                scanEntireWorld()
+                local root = characterRoot()
+                if not root or Runtime.BusyCollecting
+                    or hasWorldFruitToProcess() or hasPendingStorage() then
+                    Runtime.NoFruitSince = os.clock()
+                    Runtime.EmptyScanCount = 0
+                else
+                    Runtime.EmptyScanCount = Runtime.EmptyScanCount + 1
+                end
+                if Runtime.EmptyScanCount >= 3 and os.clock() - Runtime.NoFruitSince >= State.HopAfter then
+                    serverHop(false)
+                end
             end
-            if Runtime.EmptyScanCount >= 3 and os.clock() - Runtime.NoFruitSince >= State.HopAfter then
-                serverHop(false)
-            end
+        end)
+        if not ok then
+            warn("[Lapo Fruit Hub] Hop loop error: " .. tostring(err))
+            Runtime.Hopping = false
         end
         task.wait(0.5)
     end
