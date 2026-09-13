@@ -31,7 +31,7 @@ local function loadLapo()
 			end
 		end
 	end
-	error("Falha ao carregar Lapo-X do GitHub")
+	error("Failed to load Lapo-X from GitHub")
 end
 
 local LapoLib = loadLapo()
@@ -633,129 +633,129 @@ local function listPlayerNames()
 	return list
 end
 
-local CombatTab = Window:Tab({ id = "combat", name = "Mira & PvP" })
+local CombatTab = Window:Tab({ id = "combat", name = "Aim & PvP" })
 local SkillsTab = Window:Tab({ id = "skills", name = "Buffs" })
-local MovTab    = Window:Tab({ id = "mov",    name = "Movimento" })
-local VisualTab = Window:Tab({ id = "vis",    name = "Visuais & ESP" })
-local MiscTab   = Window:Tab({ id = "misc",   name = "Teleports & Util" })
+local MovTab    = Window:Tab({ id = "mov",    name = "Movement" })
+local VisualTab = Window:Tab({ id = "vis",    name = "Visuals & ESP" })
+local MiscTab   = Window:Tab({ id = "misc",   name = "Teleports & Utility" })
 
-CombatTab:Section({ id = "sec_aim", text = "Configurações de Mira", expanded = true })
-CombatTab:Toggle({ id = "aim_on", text = "Aimbot Ativado", default = S.AimOn, section = "sec_aim",
+CombatTab:Section({ id = "sec_aim", text = "Aim Settings", expanded = true })
+CombatTab:Toggle({ id = "aim_on", text = "Aimbot Enabled", default = S.AimOn, section = "sec_aim",
 	callback = function(v) S.AimOn = v; if not v then CurTarget, AimCF, AimPos = nil, nil, nil end end })
-CombatTab:Toggle({ id = "aim_silent", text = "Silent Aim (Redirecionar Skills)", default = S.SilentAim, section = "sec_aim",
+CombatTab:Toggle({ id = "aim_silent", text = "Silent Aim (Redirect Skills)", default = S.SilentAim, section = "sec_aim",
 	callback = function(v) S.SilentAim = v; if not v then AimCF, AimPos = nil, nil end end })
 CombatTab:Toggle({ id = "aim_hook", text = "Mouse.Hit Safe Hook", default = S.MouseHook, section = "sec_aim",
 	callback = function(v) S.MouseHook = v end })
 CombatTab:Toggle({ id = "aim_camlock", text = "Camera Lock", default = S.CamLock, section = "sec_aim",
 	callback = function(v) S.CamLock = v end })
-CombatTab:Slider({ id = "aim_camsmooth", text = "Suavidade da Câmera", min = 0.05, max = 1, step = 0.05, default = S.CamSmooth, section = "sec_aim",
+CombatTab:Slider({ id = "aim_camsmooth", text = "Camera Smoothness", min = 0.05, max = 1, step = 0.05, default = S.CamSmooth, section = "sec_aim",
 	callback = function(v) S.CamSmooth = v end })
-CombatTab:Toggle({ id = "aim_lock", text = "Fixar Alvo", default = S.TargetLock, section = "sec_aim",
+CombatTab:Toggle({ id = "aim_lock", text = "Target Lock", default = S.TargetLock, section = "sec_aim",
 	callback = function(v) S.TargetLock = v end })
-CombatTab:Dropdown({ id = "aim_mode", text = "Modo de Seleção",
+CombatTab:Dropdown({ id = "aim_mode", text = "Selection Mode",
 	options = { "Cursor", "Close", "LowHP", "Specific" }, default = S.Mode, section = "sec_aim",
 	callback = function(value)
 		local sel = type(value) == "table" and (value[2] or value[1]) or value
 		if sel then S.Mode = sel end
 	end })
-CombatTab:Dropdown({ id = "aim_part", text = "Parte do Corpo",
+CombatTab:Dropdown({ id = "aim_part", text = "Body Part",
 	options = { "HumanoidRootPart", "Head", "UpperTorso", "LowerTorso" }, default = S.AimPart, section = "sec_aim",
 	callback = function(value)
 		local sel = type(value) == "table" and (value[2] or value[1]) or value
 		if sel then S.AimPart = sel end
 	end })
-local targetDrop = CombatTab:Dropdown({ id = "aim_target", text = "Alvo Específico",
+local targetDrop = CombatTab:Dropdown({ id = "aim_target", text = "Specific Target",
 	options = listPlayerNames(), default = S.TargetName, section = "sec_aim",
 	callback = function(value)
 		local sel = type(value) == "table" and (value[2] or value[1]) or value
 		if sel then S.TargetName = sel; if sel ~= "All" then S.Mode = "Specific" end end
 	end })
-CombatTab:Button({ text = "Atualizar Lista de Jogadores",
+CombatTab:Button({ text = "Refresh Player List",
 	callback = function()
 		pcall(function() targetDrop:SetOptions(listPlayerNames()) end)
-		Window:Notify({ title = "Alvos", content = "Lista atualizada!" })
+		Window:Notify({ title = "Targets", content = "List updated!" })
 	end })
-CombatTab:TextBox({ id = "aim_target_txt", text = "Digitar Nome Manual",
-	placeholder = "Nome exato do jogador", section = "sec_aim",
+CombatTab:TextBox({ id = "aim_target_txt", text = "Type Name Manually",
+	placeholder = "Exact player name", section = "sec_aim",
 	callback = function(v)
 		v = tostring(v or ""):gsub("%s+", "")
 		if v == "" then S.TargetName = "All"
 		else S.TargetName = v; S.Mode = "Specific" end
 	end })
 
-CombatTab:Section({ id = "sec_fov", text = "FOV & Precisão", expanded = true })
-CombatTab:Slider({ id = "fov_radius", text = "Raio do FOV", min = 30, max = 800, step = 5, default = S.FOV, section = "sec_fov",
+CombatTab:Section({ id = "sec_fov", text = "FOV & Precision", expanded = true })
+CombatTab:Slider({ id = "fov_radius", text = "FOV Radius", min = 30, max = 800, step = 5, default = S.FOV, section = "sec_fov",
 	callback = function(v) S.FOV = v end })
-CombatTab:Toggle({ id = "fov_show", text = "Exibir Círculo do FOV", default = S.ShowFOV, section = "sec_fov",
+CombatTab:Toggle({ id = "fov_show", text = "Show FOV Circle", default = S.ShowFOV, section = "sec_fov",
 	callback = function(v) S.ShowFOV = v end })
-CombatTab:ColorPicker({ id = "fov_color", text = "Cor do Círculo FOV", default = S.FOVColor, section = "sec_fov",
+CombatTab:ColorPicker({ id = "fov_color", text = "FOV Circle Color", default = S.FOVColor, section = "sec_fov",
 	callback = function(hex) S.FOVColor = hex end })
 CombatTab:Slider({ id = "aim_predict", text = "Prediction", min = 0, max = 0.35, step = 0.01, default = S.Predict, section = "sec_fov",
 	callback = function(v) S.Predict = v end })
-CombatTab:Toggle({ id = "aim_ping_comp", text = "Compensar Ping", default = S.PingCompensation, section = "sec_fov",
+CombatTab:Toggle({ id = "aim_ping_comp", text = "Ping Compensation", default = S.PingCompensation, section = "sec_fov",
 	callback = function(v) S.PingCompensation = v end })
-CombatTab:Toggle({ id = "aim_noken", text = "Ignorar Ken Haki", default = S.OnlyNoKen, section = "sec_fov",
+CombatTab:Toggle({ id = "aim_noken", text = "Ignore Ken Haki", default = S.OnlyNoKen, section = "sec_fov",
 	callback = function(v) S.OnlyNoKen = v end })
 CombatTab:Toggle({ id = "aim_wall", text = "WallCheck", default = S.WallCheck, section = "sec_fov",
 	callback = function(v) S.WallCheck = v end })
-CombatTab:Toggle({ id = "aim_team", text = "Ignorar Time", default = S.TeamCheck, section = "sec_fov",
+CombatTab:Toggle({ id = "aim_team", text = "Ignore Team", default = S.TeamCheck, section = "sec_fov",
 	callback = function(v) S.TeamCheck = v end })
-CombatTab:Slider({ id = "aim_maxdist", text = "Distância Máxima", min = 200, max = 4000, step = 50, default = S.MaxDist, section = "sec_fov",
+CombatTab:Slider({ id = "aim_maxdist", text = "Max Distance", min = 200, max = 4000, step = 50, default = S.MaxDist, section = "sec_fov",
 	callback = function(v) S.MaxDist = v end })
 
-SkillsTab:Section({ id = "sec_buffs", text = "Buffs Automáticos", expanded = true })
+SkillsTab:Section({ id = "sec_buffs", text = "Auto Buffs", expanded = true })
 SkillsTab:Toggle({ id = "buff_buso", text = "Auto Buso Haki", default = S.AutoBuso, section = "sec_buffs",
 	callback = function(v) S.AutoBuso = v end })
 SkillsTab:Toggle({ id = "buff_ken", text = "Auto Ken Haki", default = S.AutoKen, section = "sec_buffs",
 	callback = function(v) S.AutoKen = v end })
-SkillsTab:Toggle({ id = "buff_race_v3", text = "Auto Raça V3 (<60% HP)", default = S.AutoRaceV3, section = "sec_buffs",
+SkillsTab:Toggle({ id = "buff_race_v3", text = "Auto Race V3 (<60% HP)", default = S.AutoRaceV3, section = "sec_buffs",
 	callback = function(v) S.AutoRaceV3 = v end })
 
-MovTab:Section({ id = "sec_speed", text = "Velocidade & Pulo", expanded = true })
-MovTab:Toggle({ id = "speed_on", text = "Ativar Velocidade", default = S.SpeedOn, section = "sec_speed",
+MovTab:Section({ id = "sec_speed", text = "Speed & Jump", expanded = true })
+MovTab:Toggle({ id = "speed_on", text = "Enable Speed", default = S.SpeedOn, section = "sec_speed",
 	callback = function(v) S.SpeedOn = v end })
 MovTab:Slider({ id = "speed_val", text = "WalkSpeed", min = 16, max = 500, step = 5, default = S.Speed, section = "sec_speed",
 	callback = function(v) S.Speed = v end })
-MovTab:Toggle({ id = "jump_on", text = "Super Pulo", default = S.JumpOn, section = "sec_speed",
+MovTab:Toggle({ id = "jump_on", text = "Super Jump", default = S.JumpOn, section = "sec_speed",
 	callback = function(v) S.JumpOn = v end })
 MovTab:Slider({ id = "jump_val", text = "JumpPower", min = 50, max = 500, step = 5, default = S.Jump, section = "sec_speed",
 	callback = function(v) S.Jump = v end })
-MovTab:Toggle({ id = "inf_jump", text = "Pulo Infinito", default = S.InfJumpOn, section = "sec_speed",
+MovTab:Toggle({ id = "inf_jump", text = "Infinite Jump", default = S.InfJumpOn, section = "sec_speed",
 	callback = function(v) S.InfJumpOn = v end })
-MovTab:Section({ id = "sec_fly", text = "Voo & Noclip", expanded = true })
+MovTab:Section({ id = "sec_fly", text = "Fly & Noclip", expanded = true })
 MovTab:Toggle({ id = "fly_on", text = "Fly", default = S.FlyOn, section = "sec_fly",
 	callback = function(v) S.FlyOn = v end })
-MovTab:Slider({ id = "fly_speed", text = "Velocidade do Fly", min = 20, max = 400, step = 5, default = S.FlySpeed, section = "sec_fly",
+MovTab:Slider({ id = "fly_speed", text = "Fly Speed", min = 20, max = 400, step = 5, default = S.FlySpeed, section = "sec_fly",
 	callback = function(v) S.FlySpeed = v end })
-MovTab:Keybind({ id = "fly_key", text = "Tecla do Fly", default = "F", section = "sec_fly",
+MovTab:Keybind({ id = "fly_key", text = "Fly Key", default = "F", section = "sec_fly",
 	onPressed = function()
 		S.FlyOn = not S.FlyOn
 		Window:Notify({ title = "Fly", content = S.FlyOn and "Fly ON" or "Fly OFF", duration = 1.5 })
 	end })
 MovTab:Toggle({ id = "noclip_on", text = "Noclip", default = S.NoclipOn, section = "sec_fly",
 	callback = function(v) S.NoclipOn = v end })
-MovTab:Section({ id = "sec_panic", text = "Anti-Morte", expanded = false })
-MovTab:Toggle({ id = "panic_on", text = "Teleportar com Pouco HP", default = S.PanicY, section = "sec_panic",
+MovTab:Section({ id = "sec_panic", text = "Anti-Death", expanded = false })
+MovTab:Toggle({ id = "panic_on", text = "Teleport on Low HP", default = S.PanicY, section = "sec_panic",
 	callback = function(v) S.PanicY = v end })
-MovTab:Slider({ id = "panic_hp", text = "Vida Mínima (% HP)", min = 5, max = 70, step = 1, default = S.PanicHP, section = "sec_panic",
+MovTab:Slider({ id = "panic_hp", text = "Min Health (% HP)", min = 5, max = 70, step = 1, default = S.PanicHP, section = "sec_panic",
 	callback = function(v) S.PanicHP = v end })
-MovTab:Slider({ id = "panic_dy", text = "Altura de Fuga", min = 100, max = 2000, step = 25, default = S.PanicDY, section = "sec_panic",
+MovTab:Slider({ id = "panic_dy", text = "Escape Height", min = 100, max = 2000, step = 25, default = S.PanicDY, section = "sec_panic",
 	callback = function(v) S.PanicDY = v end })
 
 VisualTab:Section({ id = "sec_esp", text = "ESP", expanded = true })
-VisualTab:Toggle({ id = "esp_on", text = "Ativar ESP", default = S.ESPOn, section = "sec_esp",
+VisualTab:Toggle({ id = "esp_on", text = "Enable ESP", default = S.ESPOn, section = "sec_esp",
 	callback = function(v) S.ESPOn = v; if not v then clearESP() end end })
-VisualTab:Toggle({ id = "esp_hp", text = "Exibir HP", default = S.ESPHP, section = "sec_esp",
+VisualTab:Toggle({ id = "esp_hp", text = "Show HP", default = S.ESPHP, section = "sec_esp",
 	callback = function(v) S.ESPHP = v end })
-VisualTab:Toggle({ id = "esp_dist", text = "Exibir Distância", default = S.ESPDist, section = "sec_esp",
+VisualTab:Toggle({ id = "esp_dist", text = "Show Distance", default = S.ESPDist, section = "sec_esp",
 	callback = function(v) S.ESPDist = v end })
-VisualTab:Toggle({ id = "esp_ken", text = "Exibir Ken Haki", default = S.ESPKen, section = "sec_esp",
+VisualTab:Toggle({ id = "esp_ken", text = "Show Ken Haki", default = S.ESPKen, section = "sec_esp",
 	callback = function(v) S.ESPKen = v end })
 VisualTab:Toggle({ id = "esp_chams", text = "Chams / Highlights", default = S.Chams, section = "sec_esp",
 	callback = function(v) S.Chams = v; clearESP() end })
 
-MiscTab:Section({ id = "sec_tp", text = "Teleportes Rápidos", expanded = true })
-MiscTab:Button({ text = "Teleportar Atrás do Alvo", variant = "primary",
+MiscTab:Section({ id = "sec_tp", text = "Quick Teleports", expanded = true })
+MiscTab:Button({ text = "Teleport Behind Target", variant = "primary",
 	callback = function()
 		local target = CurTarget or resolveTarget()
 		local myRoot = myHRP()
@@ -764,12 +764,12 @@ MiscTab:Button({ text = "Teleportar Atrás do Alvo", variant = "primary",
 		if myRoot and targetRoot then
 			myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 4)
 			myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-			Window:Notify({ title = "Teleporte", content = "Teleportado para: " .. target.Name })
+			Window:Notify({ title = "Teleport", content = "Teleported to: " .. target.Name })
 		else
-			Window:Notify({ title = "Erro", content = "Nenhum alvo." })
+			Window:Notify({ title = "Error", content = "No target." })
 		end
 	end })
-MiscTab:Button({ text = "Teleportar para o Mouse",
+MiscTab:Button({ text = "Teleport to Mouse",
 	callback = function()
 		local myRoot = myHRP()
 		if myRoot and Cam then
@@ -777,17 +777,17 @@ MiscTab:Button({ text = "Teleportar para o Mouse",
 			local ray = Cam:ViewportPointToRay(mouse.X, mouse.Y)
 			myRoot.CFrame = CFrame.new(ray.Origin + ray.Direction * 40)
 			myRoot.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-			Window:Notify({ title = "Teleporte", content = "Teleportado." })
+			Window:Notify({ title = "Teleport", content = "Teleported." })
 		end
 	end })
-MiscTab:Section({ id = "sec_sys", text = "Sistema", expanded = true })
-MiscTab:Keybind({ id = "toggle_key", text = "Tecla do Menu", default = "End", section = "sec_sys",
+MiscTab:Section({ id = "sec_sys", text = "System", expanded = true })
+MiscTab:Keybind({ id = "toggle_key", text = "Menu Key", default = "End", section = "sec_sys",
 	onPressed = function() Window:ToggleVisibility() end })
 MiscTab:Button({ text = "Rejoin",
 	callback = function() game:GetService("TeleportService"):Teleport(game.PlaceId, LP) end })
 
 Window:Init({ Title = "Lapo Hub X - PvP BF", ToggleKey = "End", Width = 520, Height = 400 })
-Window:Notify({ title = "Lapo Hub X - PvP BF", content = "Pressione End para abrir.", duration = 4 })
+Window:Notify({ title = "Lapo Hub X - PvP BF", content = "Press End to open.", duration = 4 })
 
 getgenv()._LAPO_CLEANUP = function()
 	S.AimOn = false; S.CamLock = false; S.FlyOn = false
@@ -805,4 +805,4 @@ getgenv()._LAPO_CLEANUP = function()
 	end
 end
 
-print("[Lapo Hub X - PvP BF] carregado.")
+print("[Lapo Hub X - PvP BF] loaded.")
